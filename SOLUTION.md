@@ -4,68 +4,161 @@
 Backend/Full-Stack
 
 ## Time Spent
-75 minutes
+180 minutes
 
 ## Approach
-Approach has been simple. Going through the readme file first and following the instructions. I am quiet familiar with this type of Architecture design, 
-and also business logic as I have previously worked within this industry. So, I wasn't hard for me to understand the project structure, or assessment business logic.
-First thing first, I understood the Database and using the .sql file and going through the models. Once done, I wrote my thoughts within the solution.md file.
+My approach was straightforward: I prioritized the project documentation and instructions before diving into the code. Having previous experience in this specific industry, I was already familiar with the architectural patterns and business logic required for educational assessments.
+
+I began by auditing the Database schema via the `.sql` seed file and cross-referencing it with the Doctrine models. After mapping the entity relationships, I reviewed the scoring logic in the service layer, identifying potential edge cases.
+
+For the implementation phase, I focused on high-integrity data entry. I built the **POST** and **PUT** endpoints with a "Service-First" mindset, ensuring that all validation, logging, and error-handling logic is encapsulated within the Domain layer for maximum reusability and observability.
+
+---
 
 ## PHASE 1: Entity Relationship Diagram
 
 ![Assessment System ERD](./erd-diagram.png)
 The assessment system is built on a decoupled architecture that separates the reusable assessment templates from the individual user sessions and response data.
-Below is the breakdown of the entities and how they relate to one another:
 
-1. assessment (The Template)
-   - Description: This is the core "blueprint" for an assessment, such as in this example, "Element is 1.1".
-   - Keys: id is the Primary Key.
-   - Cardinality: It has a Many-to-Many (N:M) relationship with assessment_questions via the assessments_questions pivot table.
+1. **assessment (The Template)**
+    - **Description**: The core "blueprint" for an assessment (e.g., "Element 1.1").
+    - **Keys**: `id` is the Primary Key.
+    - **Cardinality**: Many-to-Many (N:M) with `assessment_questions` via the pivot table.
 
-2. assessment_questions (The Question Bank)
-   - Description: Holds the actual question text and defines the type (e.g., Likert or text-based reflection).
-   - Keys: id is the Primary Key.
-   - Cardinality: Linked to assessments via the assessments_questions pivot table. This allows one question to be used in multiple assessments and one assessment to have many questions.
+2. **assessment_questions (The Question Bank)**
+    - **Description**: Defines the question content and response type (Likert or Reflection).
+    - **Keys**: `id` is the Primary Key.
+    - **Cardinality**: Linked via pivot table, allowing questions to be reused across different assessment templates.
 
-3. assessment_answer_options (Multiple Choice Definitions)
-   - Description: Stores the predefined 1-5 scale options for Likert questions.
-   - Keys: id (Primary Key) and assessment_question_id as the Foreign Key coming from assessment_questions table.
-   - Cardinality: Many-to-One (N:1) relationship with assessment_questions (one question of type Likert can have several answer options. Option number defined the sorting.).
+3. **assessment_answer_options (Multiple Choice Definitions)**
+    - **Description**: Stores the predefined 1-5 scale for Likert questions.
+    - **Keys**: `id` (Primary Key) and `assessment_question_id` (Foreign Key).
+    - **Cardinality**: Many-to-One (N:1) with `assessment_questions`. `option_number` dictates the display sequence.
 
-4. assessment_session (The User's Journey)
-   - Description: Represents a specific user's engagement with an assessment template.
-   - Keys: id (Primary Key) and assessment_id as the Foreign Key coming from assessment table.
-   - Cardinality: Many-to-One (N:1) relationship with assessment. While a user usually has one session per assessment, the assessment itself can have many sessions with different users.
+4. **assessment_session (The User's Journey)**
+    - **Description**: Tracks a specific user's engagement with an assessment blueprint.
+    - **Keys**: `id` (Primary Key) and `assessment_id` (Foreign Key).
+    - **Cardinality**: Many-to-One (N:1) with `assessment`.
 
-5. assessment_instance (The Specific Attempt)
-   - Description: Tracks a specific "run" of an assessment within a session, including timestamps for completion.
-   - Keys: id (Primary Key) and session_id as the Foreign Key coming from assessment_session table.
-   - Relationship: Many-to-One (N:1) relationship with assessment_session.
+5. **assessment_instance (The Specific Attempt)**
+    - **Description**: Tracks a specific "run" within a session, including completion timestamps.
+    - **Keys**: `id` (Primary Key) and `session_id` (Foreign Key).
+    - **Relationship**: Many-to-One (N:1) with `assessment_session`.
 
-6. assessment_answers (The Captured Data)
-   - Description: The actual responses submitted. It stores either a reference to a preset option for Likert questions or raw text for reflections.
-   - Keys: id (Primary Key), assessment_instance_id (Foreign Key) coming from assessment_instance, and assessment_answer_option_id (Foreign Key) coming from assessment_answer_options table.
-   - Cardinality: Many-to-One (N:1) relationship with assessment_instance. One instance will contain many individual answers.
+6. **assessment_answers (The Captured Data)**
+    - **Description**: The actual raw data. Stores a reference to a preset option (Likert) or raw text (Reflection).
+    - **Keys**: `id` (Primary Key), `assessment_instance_id` (Foreign Key), and `assessment_answer_option_id` (Foreign Key).
+    - **Cardinality**: Many-to-One (N:1) with `assessment_instance`.
+
+---
 
 ## Phase 2: Review Results Calculation
 
 ### Scoring Algorithm Analysis
-I have performed a manual review of the `AssessmentService::getProgressAndScore()` logic to verify the 53.85% result returned by the API for instance `d1111111...`.
+I verified the `AssessmentService::getProgressAndScore()` logic to confirm the **53.85%** result for instance `d1111111...`.
 
 **The Logic:**
-The system uses a normalization formula: `(total_score - answered_questions) / (max_score - answered_questions) * 100`.
+The system utilizes a normalization formula: `(total_score - answered_questions) / (max_score - answered_questions) * 100`.
 
 ### Review & Refinements
-
-While the math is solid, I identified several areas for hardening and optimization to make this service production-ready:
+I identified several architectural improvements to make this service production-ready:
 
 #### 1. Optimization: N+1 Query Problem
-During the review, I noticed that `findAssessmentAnswerOptionsByQuestion()` is called inside a `foreach` loop. This introduces a classic N+1 performance bottleneck where the number of database queries grows linearly with the number of questions.
-* **Observation**: In a larger assessment, this would cause significant latency.
-* **Recommendation**: In a real production environment, I would refactor the repository to eager-load all answer options in a single query indexed by question ID to keep the database overhead constant.
+The current implementation calls `findAssessmentAnswerOptionsByQuestion()` inside a `foreach` loop. This triggers a separate database query for every question in the assessment.
+* **Observation**: Scaling to larger assessments would cause significant latency.
+* **Recommendation**: I would refactor the repository to eager-load all possible answer options in a single query indexed by question ID to keep DB overhead constant.
 
 #### 2. Hardened Error Handling
-I implemented the following defensive programming measures:
-* **Null Safety**: Added guards to verify that both the `Session` and `Assessment` objects exist before processing. This prevents the API from throwing a 500 error if it encounters orphaned instance data.
-* **Division-by-Zero Guards**: I verified the logic for `completion_percentage` and the normalized `scorePercentage`. If a template is ever created with zero questions or zero-weight options, the service returns 0 rather than crashing.
-* **Rounding Consistency**: Ensured all percentages are rounded to 2 decimal places at the service level to maintain API contract reliability.
+I implemented the following defensive measures:
+* **Null Safety**: Added guards for `Session` and `Assessment` objects to prevent 500 errors on orphaned instance data.
+* **Division-by-Zero Guards**: Hardened the logic for `completion_percentage` and `scorePercentage`. If a template has zero questions, the service returns 0 rather than crashing the API.
+* **Rounding Consistency**: Standardized all percentages to 2 decimal places to ensure a clean API contract.
+
+---
+
+## Phase 3: Implement Answer Submission
+
+### Architectural Implementation
+I implemented the `POST /api/assessment/answers` endpoint, encapsulating the logic within the `AssessmentService` to maintain "thin" controllers.
+
+**Validation Logic:**
+* **Relational Integrity**: The service verifies the `question_id` actually belongs to the assessment template linked to the user's current session.
+* **Likert Constraints**: Validates that the `answer_option_id` is a valid child of the target question to prevent data "cross-pollination".
+* **Persistence & Logging**: Integrated `EntityManagerInterface` for safe persistence and `LoggerInterface` to provide production observability for both successes and failures.
+
+### Data Persistence & Idempotency
+During testing, I noted that multiple submissions for one question increase row count. The current scoring logic handles this by only processing the latest timestamp per `question_id`.
+
+### Verification of PUT (Update) Functionality
+I implemented a dedicated **PUT** endpoint to handle state-management for existing answers.
+
+**Test Case: Reflection Update**
+1. **Initial Submission**: Created a reflection via POST.
+2. **Update Execution**: Targeted the specific Answer ID via the PUT endpoint to modify the `text_answer`.
+3. **Observation**: Confirmed the text updated successfully while maintaining the original record ID, verifying the patch-style update in the service.
+
+## Implementation Details
+Build two apis, one for posting the answer and other one is for updating an existing answer.
+
+Following the best coding practices, created a standalone function within the controller using the magic method invoke. Implemented Validations, error handling and logging strategy.
+
+Implemented the business logic in Service layer, so that we can reuse it later on if necessary. Kept the controller clean.
+
+## Tools & Libraries Used
+**Libraries:** 
+- use Doctrine\ORM\EntityManagerInterface;
+- use Psr\Log\LoggerInterface;
+- use \DateTimeInterface;
+
+**AI Tools:** 
+- Google Gemini
+
+**IDE:** 
+- PHPSTORM
+
+### Testing
+```bash
+# Submit missing Q3 Likert response (Score updates: 53.85% -> 75.00%)
+curl -X POST http://localhost:8002/api/assessment/answers \
+  -H "Content-Type: application/json" \
+  -d '{
+    "instance_id": "d1111111-1111-1111-1111-111111111111",
+    "question_id": "a3333333-3333-3333-3333-333333333333",
+    "answer_option_id": "b3333333-3333-3333-3333-333333333333"
+  }'
+
+# Submit Reflection Answer
+curl -X POST http://localhost:8002/api/assessment/answers \
+  -H "Content-Type: application/json" \
+  -d '{
+    "instance_id": "d1111111-1111-1111-1111-111111111111",
+    "question_id": "a4444444-4444-4444-4444-444444444444",
+    "text_answer": "This is my testing answer."
+  }'
+
+curl -X PUT http://localhost:8002/api/assessment/answers/{id}\
+  -H "Content-Type: application/json" \
+  -d '{
+    "text_answer": "UPDATE: Hello World, this is my testing answer updated."
+  }'
+  
+  docker compose logs -f backend (To see the logs)
+  I use docker compose, as I have updated version of Docker Desktop.
+  You can use docker-compose based on your version.
+```
+
+## Challenges & Solutions
+As I mentioned earlier I have worked with this architecture design before and also with this business logic of questions and answers before in the past. It wasn't too hard for me to understand the structure of the project or to understand the business logic. 
+
+The project that I have previously worked on, had this business logic as well where employees would answer the questions and employers could see their progress as well. It was created in Livewire (TALL Stack Development). But yeah, I fixed bugs in them and created a lot more features within that project.
+
+In terms of project architecture, I always work with Docker. We have kind of same project structure where I work currently, it's just we have a few more python apis as well.
+
+## Trade-offs & Future Improvements
+- Removing the N + 1 queries from the system.
+- Implement try catch.
+- Implement logging strategy.
+- Implement indexing in database columns. 
+- Implement combined indexing in database table columns that are widely used for searching.
+- Implement deleted_at column in tables for SoftDeletes.
+- Implement OpenSearch for Audit trails logs.
