@@ -104,6 +104,8 @@ Following the best coding practices, created a standalone function within the co
 
 Implemented the business logic in Service layer, so that we can reuse it later on if necessary. Kept the controller clean.
 
+Created different branch for each phase solution. Made the PR. Approved the PR and merged respectively.
+
 ## Tools & Libraries Used
 **Libraries:** 
 - use Doctrine\ORM\EntityManagerInterface;
