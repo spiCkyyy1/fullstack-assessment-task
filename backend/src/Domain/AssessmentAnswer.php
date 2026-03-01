@@ -7,6 +7,7 @@ namespace App\Domain;
 use Doctrine\ORM\Mapping as ORM;
 use Gedmo\Timestampable\Traits\TimestampableEntity;
 use Ramsey\Uuid\Uuid;
+use \DateTimeInterface;
 
 /**
  * @ORM\Table(name="assessment_answers")
@@ -57,6 +58,9 @@ class AssessmentAnswer
         $this->assessmentAnswerOption = $assessmentAnswerOption;
         $this->textAnswer = $textAnswer;
         $this->numericValue = $numericValue;
+
+        $this->createdAt = new \DateTime();
+        $this->updatedAt = new \DateTime();
     }
 
     public function getId(): string
@@ -115,5 +119,17 @@ class AssessmentAnswer
         }
 
         return $this->textAnswer;
+    }
+
+    public function setCreatedAt(\DateTimeInterface $createdAt): self
+    {
+        $this->createdAt = $createdAt;
+        return $this;
+    }
+
+    public function setUpdatedAt(\DateTimeInterface $updatedAt): self
+    {
+        $this->updatedAt = $updatedAt;
+        return $this;
     }
 }

@@ -3,14 +3,24 @@
 declare(strict_types=1);
 
 namespace App\Domain;
+use Doctrine\ORM\EntityManagerInterface;
+use Psr\Log\LoggerInterface;
 
 class AssessmentService
 {
     private AssessmentRepository $assessmentRepository;
+    private EntityManagerInterface $entityManager;
+    private LoggerInterface $logger;
 
-    public function __construct(AssessmentRepository $assessmentRepository)
+    public function __construct(
+        AssessmentRepository $assessmentRepository,
+        EntityManagerInterface $entityManager,
+        LoggerInterface $logger
+    )
     {
         $this->assessmentRepository = $assessmentRepository;
+        $this->entityManager = $entityManager;
+        $this->logger = $logger;
     }
 
     public function getAssessmentResults(AssessmentInstance $instance): array
@@ -274,5 +284,158 @@ class AssessmentService
         }
 
         return $insights;
+    }
+
+    /**
+     * Handles the business logic for submitting an assessment answer.
+     * Validates relationships and question types before persisting.
+     */
+    public function submitAnswer(array $data): AssessmentAnswer
+    {
+        try {
+            $instanceId = $data['instance_id'] ?? null;
+            $questionId = $data['question_id'] ?? null;
+            $answerOptionId = $data['answer_option_id'] ?? null;
+            $textAnswer = $data['text_answer'] ?? null;
+
+            // Verify Instance exists
+            $instance = $this->assessmentRepository->findAssessmentInstanceById((string)$instanceId);
+            if (!$instance) {
+                throw new \InvalidArgumentException("Assessment instance not found.");
+            }
+
+            // Verify Question exists and belongs to this specific assessment template
+            /** @var AssessmentQuestion|null $question */
+            $question = $this->entityManager->getRepository(AssessmentQuestion::class)->find($questionId);
+
+            if (!$question) {
+                throw new \InvalidArgumentException("Question not found.");
+            }
+
+
+            $session = $instance->getSession();
+            if (!$session) {
+                throw new \InvalidArgumentException("Assessment instance is missing a valid session.");
+            }
+
+            $assessment = $session->getAssessment();
+            if (!$assessment) {
+                throw new \InvalidArgumentException("Session is not linked to a valid assessment template.");
+            }
+
+            if (!$assessment || !$assessment->getQuestions()->contains($question)) {
+                throw new \InvalidArgumentException("This question does not belong to the linked assessment.");
+            }
+
+            $this->logger->info('Attempting answer submission', [
+                'instance_id' => $data['instance_id'],
+                'question_id' => $data['question_id']
+            ]);
+
+            // Type-specific validation (Likert vs Reflection)
+            $option = null;
+            if ($question->getQuestionType() === 'likert') {
+                if (!$answerOptionId) {
+                    throw new \InvalidArgumentException("Likert questions require an answer_option_id.");
+                }
+
+                /** @var AssessmentAnswerOption|null $option */
+                $option = $this->entityManager->getRepository(AssessmentAnswerOption::class)->find($answerOptionId);
+
+                if (!$option || $option->getAssessmentQuestion()->getId() !== $question->getId()) {
+                    throw new \InvalidArgumentException("Invalid answer option for this question.");
+                }
+            } elseif ($question->getIsReflection()) {
+                if (empty($textAnswer)) {
+                    throw new \InvalidArgumentException("Reflection questions require a text answer.");
+                }
+            }
+
+            // Persistence
+            $answer = new AssessmentAnswer(
+                null, // UUID is auto-generated in the entity constructor
+                $instance,
+                $option,
+                $textAnswer
+            );
+
+            $this->entityManager->persist($answer);
+            $this->entityManager->flush();
+
+            $this->logger->info('Answer successfully persisted', [
+                'answer_id' => $answer->getId(),
+                'instance_id' => $instance->getId()
+            ]);
+
+            return $answer;
+        } catch (\InvalidArgumentException $e) {
+            $this->logger->warning('Validation failure in answer submission', [
+                'error' => $e->getMessage(),
+                'payload' => $data
+            ]);
+            throw $e;
+        } catch (\Exception $e) {
+            $this->logger->critical('Unexpected failure in persistence layer', [
+                'exception' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            throw $e;
+        }
+    }
+    /**
+     * Updates an existing answer record.
+     */
+    public function updateAnswer(string $id, array $data): AssessmentAnswer
+    {
+        try {
+            $this->logger->info('Initiating answer update', ['answer_id' => $id]);
+
+            $answer = $this->entityManager->getRepository(AssessmentAnswer::class)->find($id);
+
+            if (!$answer) {
+                throw new \InvalidArgumentException("Answer record not found for ID: $id");
+            }
+
+            // Update Likert Option
+            if (isset($data['answer_option_id'])) {
+                $option = $this->entityManager->getRepository(AssessmentAnswerOption::class)
+                    ->find($data['answer_option_id']);
+
+                if (!$option) {
+                    throw new \InvalidArgumentException("Invalid answer option ID provided.");
+                }
+                $answer->setAssessmentAnswerOption($option);
+            }
+
+            // Update Reflection Text
+            if (isset($data['text_answer'])) {
+                $answer->setTextAnswer($data['text_answer']);
+            }
+
+            // Senior Refinement: Ensure DateTime compatibility
+            $answer->setUpdatedAt(new \DateTime());
+
+            $this->entityManager->flush();
+
+            $this->logger->info('Answer update successful', ['answer_id' => $id]);
+
+            return $answer;
+
+        } catch (\InvalidArgumentException $e) {
+            // Business logic/validation errors are logged as warnings
+            $this->logger->warning('Update validation failed', [
+                'answer_id' => $id,
+                'error' => $e->getMessage()
+            ]);
+            throw $e;
+        } catch (\Exception $e) {
+            // Unexpected system/DB errors are logged as critical
+            $this->logger->critical('Unexpected error during answer update', [
+                'answer_id' => $id,
+                'exception' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            throw $e;
+        }
     }
 }
