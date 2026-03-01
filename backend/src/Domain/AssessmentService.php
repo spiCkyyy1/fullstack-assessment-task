@@ -58,9 +58,18 @@ class AssessmentService
 
     public function getProgressAndScore(AssessmentInstance $instance): array
     {
+        $session = $instance->getSession();
+        if (!$session) {
+            throw new \InvalidArgumentException("Assessment instance is missing a valid session.");
+        }
+
+        $assessment = $session->getAssessment();
+        if (!$assessment) {
+            throw new \InvalidArgumentException("Session is not linked to a valid assessment template.");
+        }
         $answers = $this->assessmentRepository->findAllAssessmentInstanceAnswers($instance);
-        $questions = $instance->getSession()->getAssessment()?->getQuestions()->toArray() ?? [];
-        $assessmentElement = $instance->getSession()->getAssessment()?->getElement();
+        $questions = $assessment->getQuestions()->toArray() ?? [];
+        $assessmentElement = $assessment->getElement();
 
         $totalQuestions = count($questions);
 
@@ -153,8 +162,12 @@ class AssessmentService
                 ? round(($elementAnsweredQuestions / count($elementQuestions)) * 100, 2)
                 : 0;
             // Normalize 1-5 scale to 0-100% scale
-            $normalizedElementScore = $elementAnsweredQuestions > 0 ? ($elementTotalScore - $elementAnsweredQuestions) : 0;
-            $normalizedElementMaxScore = $elementAnsweredQuestions > 0 ? ($elementMaxScore - $elementAnsweredQuestions) : 0;
+            $normalizedElementScore = $elementAnsweredQuestions > 0
+                ? ($elementTotalScore - $elementAnsweredQuestions)
+                : 0;
+            $normalizedElementMaxScore = $elementAnsweredQuestions > 0
+                ? ($elementMaxScore - $elementAnsweredQuestions)
+                : 0;
             $elementScorePercentage = $normalizedElementMaxScore > 0
                 ? round(($normalizedElementScore / $normalizedElementMaxScore) * 100, 2)
                 : 0;
@@ -178,11 +191,19 @@ class AssessmentService
         });
 
         $answeredQuestions = count($answersByQuestion);
-        $completionPercentage = $totalQuestions > 0 ? round(($answeredQuestions / $totalQuestions) * 100, 2) : 0;
+        $completionPercentage = $totalQuestions > 0
+            ? round(($answeredQuestions / $totalQuestions) * 100, 2)
+            : 0;
         // Normalize 1-5 scale to 0-100% scale for overall score
-        $normalizedTotalScore = $answeredQuestions > 0 ? ($totalScore - $answeredQuestions) : 0;
-        $normalizedTotalMaxScore = $answeredQuestions > 0 ? ($maxScore - $answeredQuestions) : 0;
-        $scorePercentage = $normalizedTotalMaxScore > 0 ? round(($normalizedTotalScore / $normalizedTotalMaxScore) * 100, 2) : 0;
+        $normalizedTotalScore = $answeredQuestions > 0
+            ? ($totalScore - $answeredQuestions)
+            : 0;
+        $normalizedTotalMaxScore = $answeredQuestions > 0
+            ? ($maxScore - $answeredQuestions)
+            : 0;
+        $scorePercentage = $normalizedTotalMaxScore > 0
+            ? round(($normalizedTotalScore / $normalizedTotalMaxScore) * 100, 2)
+            : 0;
 
         return [
             'total_questions' => $totalQuestions,
